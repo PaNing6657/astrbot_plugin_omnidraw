@@ -74,13 +74,14 @@ class OmniDrawPlugin(Star):
         self.video_manager = VideoManager(self.plugin_config)
         self.prompt_optimizer = PromptOptimizer(self.plugin_config) 
 
-        self.context.register_web_api("/astrbot_plugin_omnidraw/get_config", self.get_config_handler, ["GET"])
-        self.context.register_web_api("/astrbot_plugin_omnidraw/save_config", self.save_config_handler, ["POST"])
+        # ✨ 修复：补全了所有缺少的 `desc` 描述参数，解决 missing required positional argument: 'desc' 报错
+        self.context.register_web_api("/astrbot_plugin_omnidraw/get_config", self.get_config_handler, ["GET"], "获取万象画卷配置")
+        self.context.register_web_api("/astrbot_plugin_omnidraw/save_config", self.save_config_handler, ["POST"], "保存万象画卷配置")
         
         # ✨ 注册图库读写 API 接口
-        self.context.register_web_api("/astrbot_plugin_omnidraw/get_gallery_list", self.get_gallery_list, ["GET"])
-        self.context.register_web_api("/astrbot_plugin_omnidraw/get_gallery_image", self.get_gallery_image, ["GET"])
-        self.context.register_web_api("/astrbot_plugin_omnidraw/delete_gallery_images", self.delete_gallery_images, ["POST"])
+        self.context.register_web_api("/astrbot_plugin_omnidraw/get_gallery_list", self.get_gallery_list, ["GET"], "获取生图图库列表")
+        self.context.register_web_api("/astrbot_plugin_omnidraw/get_gallery_image", self.get_gallery_image, ["GET"], "获取图库单张图片")
+        self.context.register_web_api("/astrbot_plugin_omnidraw/delete_gallery_images", self.delete_gallery_images, ["POST"], "批量删除图库图片")
 
     # ==========================================
     # ✨ 图库后端处理器 
