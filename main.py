@@ -123,6 +123,16 @@ class OmniDrawPlugin(Star):
         if not isinstance(persona_config, dict):
             return page_config
 
+        profiles = persona_config.get("profiles")
+        if isinstance(profiles, list):
+            for profile in profiles:
+                if not isinstance(profile, dict):
+                    continue
+                raw_profile_images = profile.get("persona_ref_image", [])
+                if not isinstance(raw_profile_images, list):
+                    raw_profile_images = [raw_profile_images] if raw_profile_images else []
+                profile["persona_ref_image"] = [self._image_ref_for_page(ref) for ref in raw_profile_images if ref]
+
         raw_images = persona_config.get("persona_ref_image", [])
         if not isinstance(raw_images, list):
             raw_images = [raw_images] if raw_images else []
@@ -386,6 +396,34 @@ class OmniDrawPlugin(Star):
                     provider.setdefault("available_models", []).insert(0, selected_model)
                 return
 
+    def _find_persona_profile(self, selector: str) -> Optional[Any]:
+        selector = str(selector or "").strip()
+        if not selector:
+            return None
+
+        try:
+            index = int(selector)
+            if 1 <= index <= len(self.plugin_config.personas):
+                return self.plugin_config.personas[index - 1]
+            if index == 0 and self.plugin_config.personas:
+                return self.plugin_config.personas[0]
+        except ValueError:
+            pass
+
+        selector_lower = selector.lower()
+        for persona in self.plugin_config.personas:
+            if persona.id.lower() == selector_lower or persona.name.lower() == selector_lower:
+                return persona
+        for persona in self.plugin_config.personas:
+            if selector_lower in persona.name.lower():
+                return persona
+        return None
+
+    def _set_active_persona(self, persona_id: str) -> None:
+        persona_conf = self.raw_config.setdefault("persona_config", {})
+        persona_conf["active_persona_id"] = persona_id
+        self._apply_runtime_config(self.raw_config)
+
     def _parse_extra_params(self, extra_params: str) -> Dict[str, Any]:
         if not extra_params:
             return {}
@@ -410,6 +448,8 @@ class OmniDrawPlugin(Star):
             "/画 [提示词] [--参数 值]\n"
             "/自拍 [动作] [--参数 值]\n"
             "/视频 [提示词] [--参数 值]\n"
+            "/人设\n"
+            "/切换人设 [序号/ID/名称]\n"
             "/切换链路 [画图/自拍/视频/副脑] [节点ID]\n"
             "/切换模型 [画图/自拍/视频] [序号或名称]\n"
             "/万象帮助\n\n"
@@ -417,6 +457,52 @@ class OmniDrawPlugin(Star):
         if self.plugin_config.presets:
             msg += "✨ 极速宏:\n" + "\n".join([f"/{preset}" for preset in self.plugin_config.presets.keys()])
         yield event.plain_result(msg)
+
+    @filter.command("人设")
+    @handle_errors
+    async def cmd_persona_list(self, event: AstrMessageEvent) -> AsyncGenerator[Any, None]:
+        if not self._has_permission(event):
+            return
+
+        msg = "🎭 可用人设:\n"
+        for index, persona in enumerate(self.plugin_config.personas, start=1):
+            marker = "👉" if persona.id == self.plugin_config.active_persona_id else "  "
+            msg += f"{marker} [{index}] {persona.name} ({persona.id}) · 参考图 {len(persona.ref_images)} 张\n"
+        msg += "\n使用 /切换人设 [序号/ID/名称] 切换自拍人格与对应参考图组。"
+        yield event.plain_result(msg)
+
+    @filter.command("切换人设")
+    @handle_errors
+    async def cmd_switch_persona(
+        self,
+        event: AstrMessageEvent,
+        p1: str = "",
+        p2: str = "",
+        p3: str = "",
+        p4: str = "",
+        p5: str = "",
+    ) -> AsyncGenerator[Any, None]:
+        if not self._has_permission(event):
+            return
+
+        fallback = " ".join(str(item) for item in [p1, p2, p3, p4, p5] if item).strip()
+        selector = self._extract_command_message(event, "切换人设", fallback)
+        if not selector:
+            yield event.plain_result(f"{MessageEmoji.WARNING} 缺少人设。用法: /切换人设 [序号/ID/名称]\n可先发送 /人设 查看列表。")
+            return
+
+        persona = self._find_persona_profile(selector)
+        if not persona:
+            yield event.plain_result(f"{MessageEmoji.WARNING} 找不到人设: {selector}\n可先发送 /人设 查看列表。")
+            return
+
+        self._set_active_persona(persona.id)
+        self._persist_config()
+        self._safe_update_context_config()
+        yield event.plain_result(
+            f"{MessageEmoji.SUCCESS} 已切换至人设「{self.plugin_config.persona_name}」，"
+            f"自拍将使用该人设的 {len(self.plugin_config.persona_ref_images)} 张参考图。"
+        )
 
     @filter.command("切换链路")
     @handle_errors

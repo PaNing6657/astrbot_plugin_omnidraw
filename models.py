@@ -4,13 +4,14 @@ AstrBot 万象画卷插件 - 数据模型与配置归一化。
 import base64
 import binascii
 import os
+import re
 import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 PLUGIN_NAME = "astrbot_plugin_omnidraw"
 PLUGIN_AUTHOR = "雪碧bir"
-PLUGIN_VERSION = "3.2.1"
+PLUGIN_VERSION = "3.3.0"
 
 
 @dataclass
@@ -29,6 +30,22 @@ class ProviderConfig:
 
 
 @dataclass
+class PersonaProfile:
+    id: str
+    name: str
+    base_prompt: str
+    ref_images: List[str] = field(default_factory=list)
+
+    def to_config_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "persona_name": self.name,
+            "persona_base_prompt": self.base_prompt,
+            "persona_ref_image": list(self.ref_images),
+        }
+
+
+@dataclass
 class PluginConfig:
     providers: List[ProviderConfig]
     video_providers: List[ProviderConfig]
@@ -42,6 +59,8 @@ class PluginConfig:
     persona_base_prompt: str
     persona_ref_image: str
     persona_ref_images: List[str]
+    active_persona_id: str
+    personas: List[PersonaProfile]
     allowed_users: List[str]
     optimizer_style: str
     optimizer_custom_prompt: str
@@ -82,11 +101,16 @@ class PluginConfig:
         router_conf = _ensure_dict(config_dict, "router_config")
         perm_conf = _ensure_dict(config_dict, "permission_config")
 
-        processed_images = _process_persona_images(
-            persona_conf.get("persona_ref_image", []),
-            os.path.join(data_dir, "persona_refs"),
-        )
-        persona_conf["persona_ref_image"] = processed_images
+        for legacy_key in ("persona_name", "persona_base_prompt", "persona_ref_image", "persona_ref_images"):
+            if legacy_key in config_dict and legacy_key not in persona_conf:
+                persona_conf[legacy_key] = config_dict[legacy_key]
+
+        personas, active_persona = _normalize_persona_profiles(persona_conf, data_dir)
+        persona_conf["profiles"] = [profile.to_config_dict() for profile in personas]
+        persona_conf["active_persona_id"] = active_persona.id
+        persona_conf["persona_name"] = active_persona.name
+        persona_conf["persona_base_prompt"] = active_persona.base_prompt
+        persona_conf["persona_ref_image"] = list(active_persona.ref_images)
 
         chains = {
             "text2img": _parse_chain(router_conf.get("chain_text2img", "node_1")),
@@ -108,10 +132,12 @@ class PluginConfig:
             optimizer_model=optimizer_model or "gpt-4o-mini",
             optimizer_timeout=_to_float(opt_conf.get("optimizer_timeout", 15.0), 15.0, minimum=1.0),
             max_batch_count=_to_int(opt_conf.get("max_batch_count", 0), 0, minimum=0),
-            persona_name=str(persona_conf.get("persona_name", "默认助理")).strip() or "默认助理",
-            persona_base_prompt=str(persona_conf.get("persona_base_prompt", "")),
-            persona_ref_image=processed_images[0] if processed_images else "",
-            persona_ref_images=processed_images,
+            persona_name=active_persona.name,
+            persona_base_prompt=active_persona.base_prompt,
+            persona_ref_image=active_persona.ref_images[0] if active_persona.ref_images else "",
+            persona_ref_images=list(active_persona.ref_images),
+            active_persona_id=active_persona.id,
+            personas=personas,
             allowed_users=_parse_allowed_users(perm_conf.get("allowed_users", "")),
             optimizer_style=str(opt_conf.get("optimizer_style", "手机日常原生感")).strip() or "手机日常原生感",
             optimizer_custom_prompt=str(opt_conf.get("optimizer_custom_prompt", "")),
@@ -128,6 +154,12 @@ class PluginConfig:
         for provider in self.video_providers:
             if provider.id == provider_id:
                 return provider
+        return None
+
+    def get_persona(self, persona_id: str) -> Optional[PersonaProfile]:
+        for persona in self.personas:
+            if persona.id == persona_id:
+                return persona
         return None
 
 
@@ -262,7 +294,84 @@ def _to_int(value: Any, default: int, minimum: Optional[int] = None) -> int:
     return result
 
 
-def _process_persona_images(raw_images: Any, refs_dir: str) -> List[str]:
+def _normalize_persona_profiles(persona_conf: Dict[str, Any], data_dir: str) -> Tuple[List[PersonaProfile], PersonaProfile]:
+    refs_dir = os.path.join(data_dir, "persona_refs")
+    raw_profiles = persona_conf.get("profiles")
+    if not isinstance(raw_profiles, list) or not raw_profiles:
+        raw_profiles = [
+            {
+                "id": persona_conf.get("active_persona_id") or persona_conf.get("persona_id") or "default",
+                "persona_name": persona_conf.get("persona_name", "默认助理"),
+                "persona_base_prompt": persona_conf.get("persona_base_prompt", ""),
+                "persona_ref_image": persona_conf.get(
+                    "persona_ref_image",
+                    persona_conf.get("persona_ref_images", []),
+                ),
+            }
+        ]
+
+    used_ids: Set[str] = set()
+    profiles: List[PersonaProfile] = []
+    active_refs: List[str] = []
+
+    for index, raw_profile in enumerate(raw_profiles):
+        if not isinstance(raw_profile, dict):
+            raw_profile = {}
+
+        name = str(
+            raw_profile.get(
+                "persona_name",
+                raw_profile.get("name", "默认助理" if index == 0 else f"人设 {index + 1}"),
+            )
+        ).strip() or ("默认助理" if index == 0 else f"人设 {index + 1}")
+        profile_id = _normalize_persona_id(raw_profile.get("id", ""), name, index, used_ids)
+        base_prompt = str(raw_profile.get("persona_base_prompt", raw_profile.get("base_prompt", "")))
+        raw_images = raw_profile.get(
+            "persona_ref_image",
+            raw_profile.get("persona_ref_images", raw_profile.get("ref_images", [])),
+        )
+        processed_images = _process_persona_images(raw_images, refs_dir, cleanup=False)
+        active_refs.extend(processed_images)
+        profiles.append(
+            PersonaProfile(
+                id=profile_id,
+                name=name,
+                base_prompt=base_prompt,
+                ref_images=processed_images,
+            )
+        )
+
+    if not profiles:
+        profiles.append(PersonaProfile(id="default", name="默认助理", base_prompt="", ref_images=[]))
+
+    _cleanup_unused_persona_refs(refs_dir, active_refs)
+
+    active_id = str(persona_conf.get("active_persona_id", "")).strip()
+    active_persona = next(
+        (profile for profile in profiles if profile.id == active_id or profile.id.lower() == active_id.lower()),
+        profiles[0],
+    )
+    return profiles, active_persona
+
+
+def _normalize_persona_id(raw_id: Any, name: str, index: int, used_ids: Set[str]) -> str:
+    candidate = str(raw_id or "").strip()
+    if not candidate:
+        candidate = "default" if index == 0 else name
+    candidate = re.sub(r"[^a-zA-Z0-9_-]+", "_", candidate).strip("_").lower()
+    if not candidate:
+        candidate = "default" if index == 0 else f"persona_{index + 1}"
+
+    base_candidate = candidate
+    suffix = 2
+    while candidate in used_ids:
+        candidate = f"{base_candidate}_{suffix}"
+        suffix += 1
+    used_ids.add(candidate)
+    return candidate
+
+
+def _process_persona_images(raw_images: Any, refs_dir: str, cleanup: bool = True) -> List[str]:
     os.makedirs(refs_dir, exist_ok=True)
     processed_images = []
 
@@ -277,7 +386,8 @@ def _process_persona_images(raw_images: Any, refs_dir: str) -> List[str]:
         else:
             processed_images.append(img_ref)
 
-    _cleanup_unused_persona_refs(refs_dir, processed_images)
+    if cleanup:
+        _cleanup_unused_persona_refs(refs_dir, processed_images)
     return processed_images
 
 

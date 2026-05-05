@@ -1,6 +1,14 @@
 const mockConfig = {
     permission_config: { allowed_users: "" },
-    persona_config: { persona_name: "默认助理", persona_base_prompt: "", persona_ref_image: [] },
+    persona_config: {
+        active_persona_id: "default",
+        persona_name: "默认助理",
+        persona_base_prompt: "",
+        persona_ref_image: [],
+        profiles: [
+            { id: "default", persona_name: "默认助理", persona_base_prompt: "", persona_ref_image: [] }
+        ]
+    },
     optimizer_config: {
         enable_optimizer: true,
         optimizer_style: "自拍专用极致真实",
@@ -32,7 +40,7 @@ const bridge = window.AstrBotPluginPage || {
 
 let state = {
     permission_config: {},
-    persona_config: { persona_ref_image: [] },
+    persona_config: { active_persona_id: "default", profiles: [], persona_ref_image: [] },
     optimizer_config: {},
     router_config: {},
     presets: [],
@@ -81,6 +89,109 @@ function normalizeModelList(value) {
 
 function normalizeTextAreaKeys(value) {
     return Array.isArray(value) ? value.join("\n") : String(value || "");
+}
+
+function normalizePersonaImages(value) {
+    if (typeof value === "string" && value.trim()) return [value];
+    if (Array.isArray(value)) return value.filter(Boolean);
+    return [];
+}
+
+function makePersonaId(seed, fallbackIndex = 1) {
+    const ascii = String(seed || "")
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9_-]+/g, "_")
+        .replace(/^_+|_+$/g, "");
+    return ascii || `persona_${fallbackIndex}`;
+}
+
+function uniquePersonaId(seed, index, usedIds) {
+    const base = makePersonaId(seed, index + 1);
+    let candidate = base;
+    let suffix = 2;
+    while (usedIds.has(candidate)) {
+        candidate = `${base}_${suffix}`;
+        suffix += 1;
+    }
+    usedIds.add(candidate);
+    return candidate;
+}
+
+function normalizePersonaProfiles(rawPersonaConfig = {}) {
+    const rawProfiles = Array.isArray(rawPersonaConfig.profiles) && rawPersonaConfig.profiles.length
+        ? rawPersonaConfig.profiles
+        : [{
+            id: rawPersonaConfig.active_persona_id || rawPersonaConfig.persona_id || "default",
+            persona_name: rawPersonaConfig.persona_name || "默认助理",
+            persona_base_prompt: rawPersonaConfig.persona_base_prompt || "",
+            persona_ref_image: rawPersonaConfig.persona_ref_image || rawPersonaConfig.persona_ref_images || []
+        }];
+
+    const usedIds = new Set();
+    const profiles = rawProfiles.map((profile, index) => {
+        const source = profile && typeof profile === "object" ? profile : {};
+        const name = String(source.persona_name || source.name || (index === 0 ? "默认助理" : `人设 ${index + 1}`)).trim() || (index === 0 ? "默认助理" : `人设 ${index + 1}`);
+        const id = uniquePersonaId(source.id || (index === 0 ? "default" : name), index, usedIds);
+        return {
+            id,
+            persona_name: name,
+            persona_base_prompt: String(source.persona_base_prompt || source.base_prompt || ""),
+            persona_ref_image: normalizePersonaImages(source.persona_ref_image || source.persona_ref_images || source.ref_images)
+        };
+    });
+
+    if (!profiles.length) {
+        profiles.push({ id: "default", persona_name: "默认助理", persona_base_prompt: "", persona_ref_image: [] });
+    }
+
+    const requestedActive = String(rawPersonaConfig.active_persona_id || "").trim();
+    const requestedActiveLower = requestedActive.toLowerCase();
+    const activeProfile = profiles.find((profile) => profile.id === requestedActive || profile.id.toLowerCase() === requestedActiveLower) || profiles[0];
+    return {
+        active_persona_id: activeProfile.id,
+        profiles,
+        persona_name: activeProfile.persona_name,
+        persona_base_prompt: activeProfile.persona_base_prompt,
+        persona_ref_image: activeProfile.persona_ref_image
+    };
+}
+
+function getActivePersona() {
+    if (!Array.isArray(state.persona_config.profiles) || !state.persona_config.profiles.length) {
+        state.persona_config.profiles = [{ id: "default", persona_name: "默认助理", persona_base_prompt: "", persona_ref_image: [] }];
+    }
+    let active = state.persona_config.profiles.find((profile) => profile.id === state.persona_config.active_persona_id);
+    if (!active) {
+        active = state.persona_config.profiles[0];
+        state.persona_config.active_persona_id = active.id;
+    }
+    active.persona_ref_image = normalizePersonaImages(active.persona_ref_image);
+    return active;
+}
+
+function syncActivePersonaMirror() {
+    const active = getActivePersona();
+    state.persona_config.active_persona_id = active.id;
+    state.persona_config.persona_name = active.persona_name;
+    state.persona_config.persona_base_prompt = active.persona_base_prompt;
+    state.persona_config.persona_ref_image = active.persona_ref_image;
+}
+
+function writeActivePersonaFieldsFromForm() {
+    const active = getActivePersona();
+    const nameInput = byId("persona_name");
+    const promptInput = byId("persona_prompt");
+    if (nameInput) active.persona_name = nameInput.value.trim() || "未命名人设";
+    if (promptInput) active.persona_base_prompt = promptInput.value;
+    syncActivePersonaMirror();
+}
+
+function bindPersonaFields() {
+    syncActivePersonaMirror();
+    const active = getActivePersona();
+    byId("persona_name").value = active.persona_name || "默认助理";
+    byId("persona_prompt").value = active.persona_base_prompt || "";
 }
 
 function showToast(message, type = "success") {
@@ -133,12 +244,33 @@ function renderSelectors() {
     renderTo("sel-route-video", state.video_providers, "route_video");
 }
 
+function renderPersonaProfiles() {
+    const container = byId("persona-profiles-container");
+    if (!container) return;
+    syncActivePersonaMirror();
+    const profiles = state.persona_config.profiles || [];
+    container.innerHTML = profiles.map((profile, index) => {
+        const isActive = profile.id === state.persona_config.active_persona_id;
+        const deleteControl = profiles.length > 1
+            ? `<span class="persona-profile-delete" data-action="del-persona" data-index="${index}" title="删除人设">×</span>`
+            : "";
+        return `
+            <button type="button" class="persona-profile-chip ${isActive ? "active" : ""}" data-action="switch-persona" data-index="${index}">
+                <span class="persona-profile-name">${escapeHtml(profile.persona_name || "未命名人设")}</span>
+                <small>${escapeHtml(profile.id)} · ${normalizePersonaImages(profile.persona_ref_image).length} 图</small>
+                ${deleteControl}
+            </button>
+        `;
+    }).join("");
+}
+
 function renderPersonaImages() {
     const container = byId("persona-upload-container");
     if (!container) return;
+    syncActivePersonaMirror();
     container.querySelectorAll(".image-preview-wrapper").forEach((el) => el.remove());
     const trigger = byId("persona-upload-trigger");
-    const images = state.persona_config.persona_ref_image || [];
+    const images = getActivePersona().persona_ref_image || [];
     images.forEach((url, idx) => {
         const wrapper = document.createElement("div");
         wrapper.className = "image-preview-wrapper";
@@ -252,8 +384,7 @@ function bindBasicFields() {
     byId("route_img").value = state.router_config.chain_text2img || "node_1";
     byId("route_selfie").value = state.router_config.chain_selfie || "node_1";
     byId("route_video").value = state.router_config.chain_video || "video_node_1";
-    byId("persona_name").value = state.persona_config.persona_name || "默认助理";
-    byId("persona_prompt").value = state.persona_config.persona_base_prompt || "";
+    bindPersonaFields();
     byId("opt_enable").checked = Boolean(state.optimizer_config.enable_optimizer);
     byId("opt_style").value = state.optimizer_config.optimizer_style || "手机日常原生感";
     byId("opt_chain").value = state.optimizer_config.chain_optimizer || "node_1";
@@ -269,8 +400,7 @@ function readBasicFields() {
     state.router_config.chain_text2img = byId("route_img").value.trim();
     state.router_config.chain_selfie = byId("route_selfie").value.trim();
     state.router_config.chain_video = byId("route_video").value.trim();
-    state.persona_config.persona_name = byId("persona_name").value.trim();
-    state.persona_config.persona_base_prompt = byId("persona_prompt").value;
+    writeActivePersonaFieldsFromForm();
     state.optimizer_config.enable_optimizer = byId("opt_enable").checked;
     state.optimizer_config.optimizer_style = byId("opt_style").value;
     state.optimizer_config.chain_optimizer = byId("opt_chain").value.trim();
@@ -303,6 +433,13 @@ function validateConfig() {
         if (duplicates.length) return `${label}节点 ID 重复：${duplicates[0]}`;
         return "";
     };
+    writeActivePersonaFieldsFromForm();
+    const personaIds = state.persona_config.profiles.map((profile) => String(profile.id || "").trim()).filter(Boolean);
+    const personaNames = state.persona_config.profiles.map((profile) => String(profile.persona_name || "").trim());
+    const duplicatePersonaIds = personaIds.filter((id, idx) => personaIds.indexOf(id) !== idx);
+    if (!state.persona_config.profiles.length) return "至少需要保留一个人设";
+    if (personaNames.some((name) => !name)) return "人设名称不能为空";
+    if (duplicatePersonaIds.length) return `人设 ID 重复：${duplicatePersonaIds[0]}`;
     return validateList(state.providers, "图像") || validateList(state.video_providers, "视频");
 }
 
@@ -365,9 +502,61 @@ function addModel(kind, idx) {
     setDirty();
 }
 
+function switchPersona(index) {
+    const profiles = state.persona_config.profiles || [];
+    if (!profiles[index]) return;
+    writeActivePersonaFieldsFromForm();
+    state.persona_config.active_persona_id = profiles[index].id;
+    bindPersonaFields();
+    renderPersonaProfiles();
+    renderPersonaImages();
+    showToast(`已切换至「${profiles[index].persona_name || "未命名人设"}」`);
+    setDirty();
+}
+
+function addPersona() {
+    writeActivePersonaFieldsFromForm();
+    const usedIds = new Set((state.persona_config.profiles || []).map((profile) => profile.id));
+    const index = state.persona_config.profiles.length;
+    const id = uniquePersonaId(`persona_${index + 1}`, index, usedIds);
+    const profile = {
+        id,
+        persona_name: `人设 ${index + 1}`,
+        persona_base_prompt: "",
+        persona_ref_image: []
+    };
+    state.persona_config.profiles.push(profile);
+    state.persona_config.active_persona_id = profile.id;
+    bindPersonaFields();
+    renderPersonaProfiles();
+    renderPersonaImages();
+    showToast("已新增人设");
+    setDirty();
+    byId("persona_name")?.focus();
+}
+
+function deletePersona(index) {
+    const profiles = state.persona_config.profiles || [];
+    if (profiles.length <= 1 || !profiles[index]) {
+        showToast("至少需要保留一个人设", "error");
+        return;
+    }
+    const removingActive = profiles[index].id === state.persona_config.active_persona_id;
+    const removed = profiles.splice(index, 1)[0];
+    if (removingActive) {
+        const fallback = profiles[Math.max(0, index - 1)] || profiles[0];
+        state.persona_config.active_persona_id = fallback.id;
+        bindPersonaFields();
+        renderPersonaImages();
+    }
+    renderPersonaProfiles();
+    showToast(`已删除「${removed.persona_name || removed.id}」`);
+    setDirty();
+}
+
 function setupEventDelegation() {
     const fileInput = byId("hidden-file-input");
-    const pressableSelector = ".nav-item, .btn-primary, .btn-secondary, .btn-glass-secondary, .btn-ghost, .upload-trigger, .selector-chip, .api-chip";
+    const pressableSelector = ".nav-item, .btn-primary, .btn-secondary, .btn-glass-secondary, .btn-ghost, .upload-trigger, .selector-chip, .api-chip, .persona-profile-chip";
 
     document.body.addEventListener("pointerdown", (e) => {
         const target = e.target.closest(pressableSelector);
@@ -425,6 +614,18 @@ function setupEventDelegation() {
         const idx = parseInt(btn.getAttribute("data-index"), 10);
 
         if (act === "save-config") saveConfig(btn);
+        if (act === "switch-persona") {
+            switchPersona(idx);
+            return;
+        }
+        if (act === "add-persona") {
+            addPersona();
+            return;
+        }
+        if (act === "del-persona") {
+            deletePersona(idx);
+            return;
+        }
         if (act === "add-preset") {
             state.presets.push({ name: "", prompt: "" });
             renderPresets();
@@ -448,7 +649,13 @@ function setupEventDelegation() {
             setDirty();
         }
         if (act === "del-video-provider") animateDel("video-providers-container", state.video_providers, idx, renderVideoProviders, renderSelectors);
-        if (act === "del-persona-img") animateDel("persona-upload-container", state.persona_config.persona_ref_image, idx, renderPersonaImages);
+        if (act === "del-persona-img") {
+            animateDel("persona-upload-container", getActivePersona().persona_ref_image, idx, () => {
+                syncActivePersonaMirror();
+                renderPersonaImages();
+                renderPersonaProfiles();
+            });
+        }
         if (act === "add-prov-model") addModel("image", idx);
         if (act === "add-vid-model") addModel("video", idx);
         if (act === "del-prov-model") {
@@ -478,6 +685,15 @@ function setupEventDelegation() {
         const v = input.value;
         if (s === "preset-name") state.presets[i].name = v;
         if (s === "preset-prompt") state.presets[i].prompt = v;
+        if (s === "persona-name") {
+            getActivePersona().persona_name = v.trim() || "未命名人设";
+            syncActivePersonaMirror();
+            renderPersonaProfiles();
+        }
+        if (s === "persona-prompt") {
+            getActivePersona().persona_base_prompt = v;
+            syncActivePersonaMirror();
+        }
         if (s === "prov-id") state.providers[i].id = v;
         if (s === "prov-url") state.providers[i].base_url = v;
         if (s === "prov-time") state.providers[i].timeout = parseFloat(v) || 60;
@@ -508,14 +724,17 @@ function setupEventDelegation() {
         const files = Array.from(e.target.files || []);
         if (!files.length) return;
         let loadedCount = 0;
-        state.persona_config.persona_ref_image ||= [];
+        const activePersona = getActivePersona();
+        activePersona.persona_ref_image ||= [];
         files.forEach((file) => {
             const reader = new FileReader();
             reader.onload = (evt) => {
-                state.persona_config.persona_ref_image.push(evt.target.result);
+                activePersona.persona_ref_image.push(evt.target.result);
                 loadedCount += 1;
                 if (loadedCount === files.length) {
+                    syncActivePersonaMirror();
                     renderPersonaImages();
+                    renderPersonaProfiles();
                     showToast(`已添加 ${files.length} 张图片`);
                     setDirty();
                 }
@@ -568,13 +787,7 @@ async function init() {
     state.router_config.chain_text2img = deepFind(route, ["chain_text2img"], "node_1");
     state.router_config.chain_selfie = deepFind(route, ["chain_selfie"], "node_1");
     state.router_config.chain_video = deepFind(route, ["chain_video"], "video_node_1");
-    state.persona_config.persona_name = deepFind(pers, ["persona_name"], "默认助理");
-    state.persona_config.persona_base_prompt = deepFind(pers, ["persona_base_prompt"]);
-
-    const rawImage = deepFind(pers, ["persona_ref_image"]);
-    if (typeof rawImage === "string" && rawImage.trim()) state.persona_config.persona_ref_image = [rawImage];
-    else if (Array.isArray(rawImage)) state.persona_config.persona_ref_image = rawImage;
-    else state.persona_config.persona_ref_image = [];
+    state.persona_config = normalizePersonaProfiles(pers);
 
     state.optimizer_config.enable_optimizer = deepFind(opt, ["enable_optimizer"], true);
     state.optimizer_config.optimizer_style = deepFind(opt, ["optimizer_style"], "手机日常原生感");
@@ -617,6 +830,7 @@ async function init() {
 
     bindBasicFields();
     renderSelectors();
+    renderPersonaProfiles();
     renderPresets();
     renderProviders();
     renderVideoProviders();
