@@ -4,17 +4,17 @@
     <meta charset="utf-8" />
     <title>Omni-Draw Station</title>
     <link rel="stylesheet" href="./style.css" />
+    
     <style>
         @media screen and (max-width: 768px) {
-            /* 基础布局：变为上下结构，确保不会左右溢出 */
+            /* 1. 基础布局：变为上下结构，确保不会左右溢出 */
             .layout-wrapper { 
                 flex-direction: column !important; 
                 height: 100vh !important; 
                 display: flex !important;
-                overflow: hidden !important; 
             }
             
-            /* 侧边栏：移动到顶部，作为固定的导航区域 */
+            /* 2. 侧边栏变身顶部导航区，悬浮吸顶 */
             .sidebar { 
                 width: 100% !important; 
                 height: auto !important; 
@@ -22,23 +22,41 @@
                 flex-shrink: 0 !important;
                 border-right: none !important; 
                 border-bottom: 1px solid rgba(0,0,0,0.1) !important;
-                z-index: 100 !important; 
-                background: rgba(255, 255, 255, 0.9) !important;
-                backdrop-filter: blur(10px) !important;
+                position: sticky !important;
+                top: 0 !important;
+                z-index: 1000 !important; 
             }
 
+            /* 3. 头部区域：为右上角的保存按钮留出空间 */
             .sidebar-header { 
                 display: flex !important; 
                 flex-direction: row !important; 
-                justify-content: space-between !important; 
                 align-items: center !important; 
                 margin-bottom: 10px !important; 
+                padding-right: 120px !important; /* 关键：给保存按钮腾出位置 */
             }
             
             .brand h1 { font-size: 20px !important; margin: 0 !important; }
-            .status-dot { margin: 0 !important; }
+            .status-dot { margin: 0 0 0 10px !important; }
             
-            /* 导航菜单：横向排列，允许滑动，隐藏多余文本 */
+            /* 4. 彻底解决重叠：保存按钮作为独立模块，钉在右上角！ */
+            .save-panel { 
+                position: absolute !important; 
+                top: 15px !important; 
+                right: 15px !important; 
+                width: 110px !important; 
+                padding: 0 !important; 
+                margin: 0 !important; 
+            }
+            .save-panel button { 
+                width: 100% !important; 
+                padding: 8px 12px !important; 
+                border-radius: 20px !important; 
+                font-size: 13px !important;
+                box-shadow: 0 4px 10px rgba(0,0,0,0.15) !important;
+            }
+            
+            /* 5. 导航菜单：横向排列滑动，隐藏多余文本 */
             .nav-menu { 
                 display: flex !important; 
                 flex-direction: row !important; 
@@ -48,98 +66,60 @@
                 padding-bottom: 5px !important; 
                 -webkit-overflow-scrolling: touch !important; 
             }
-            .nav-menu::-webkit-scrollbar { display: none !important; } /* 隐藏滚动条 */
-            .nav-label { display: none !important; } /* 隐藏英文分类标签 */
-            .nav-item { 
-                width: auto !important; 
-                flex: 0 0 auto !important; 
-                padding: 8px 14px !important; 
-                margin: 0 !important; 
-                font-size: 14px !important; 
-            }
+            .nav-menu::-webkit-scrollbar { display: none !important; }
+            .nav-label { display: none !important; }
+            .nav-item { width: auto !important; flex: 0 0 auto !important; padding: 8px 14px !important; margin: 0 !important; font-size: 14px !important; }
             
-            /* 主内容区：底部预留充足空间，避免被悬浮按钮遮挡 */
+            /* 6. 主内容区：恢复正常滑动 */
             .content { 
                 flex: 1 !important; 
-                padding: 15px 15px 120px 15px !important; /* 关键：底部留出 120px 给保存按钮 */
+                padding: 15px !important; 
                 overflow-y: auto !important; 
                 -webkit-overflow-scrolling: touch !important; 
             }
-            
             .page-header h2 { font-size: 22px !important; }
             
-            /* 网格布局：强制双列变单列，防止内容挤压 */
-            .grid-row, .grid-2-col { 
-                display: flex !important; 
-                flex-direction: column !important; 
-                gap: 15px !important; 
-            }
+            /* 7. 解决电脑端正常但手机端挤压的网格问题：强制变为单列 */
+            .grid-row, .grid-2-col { display: flex !important; flex-direction: column !important; gap: 15px !important; }
             
-            /* 卡片与表单：宽度撑满，防溢出 */
-            .card { 
-                padding: 15px !important; 
-                width: 100% !important; 
-                box-sizing: border-box !important; 
-                margin-bottom: 15px !important; 
-            }
-            .form-group { width: 100% !important; box-sizing: border-box !important; }
+            .card { padding: 15px !important; width: 100% !important; box-sizing: border-box !important; margin-bottom: 15px !important; }
+            .form-group { width: 100% !important; box-sizing: border-box !important; overflow: hidden !important; }
             
-            /* 输入框：强制 100% 宽度，修复错位与溢出 */
-            .input-modern, .input-glass, textarea, select { 
+            /* 8. 修复输入框崩坏溢出：严格限制最大宽度，并修复盒模型 */
+            .input-modern, textarea, select, input[type="text"], input[type="number"] { 
                 width: 100% !important; 
                 max-width: 100% !important; 
                 box-sizing: border-box !important; 
             }
             
-            /* 复杂头部：纵向排列按钮 */
-            .card-header.space-between { 
-                flex-direction: column !important; 
-                align-items: flex-start !important; 
-                gap: 10px !important; 
-            }
-            .card-header.space-between button { width: 100% !important; }
+            /* 9. 复杂头部卡片：纵向排列按钮 */
+            .card-header.space-between { flex-direction: column !important; align-items: flex-start !important; gap: 10px !important; }
+            .card-header.space-between button { width: 100% !important; margin: 0 !important;}
             
-            /* 列表项（如极速宏）：纵向排版更易点按 */
+            /* 10. 极速宏预设：纵向排版更易点按 */
             .list-item { 
-                display: flex !important; 
-                flex-direction: column !important; 
-                gap: 10px !important; 
-                height: auto !important; 
-                padding: 15px !important; 
-                box-sizing: border-box !important; 
-                background: rgba(0,0,0,0.03) !important; 
-                border-radius: 12px !important;
+                display: flex !important; flex-direction: column !important; gap: 10px !important; height: auto !important; 
+                padding: 15px !important; box-sizing: border-box !important; background: rgba(0,0,0,0.03) !important; border-radius: 12px !important;
             }
-            .list-item span { display: none !important; } /* 隐藏间隔箭头 */
+            .list-item input { background: rgba(255,255,255,0.5) !important; }
+            .list-item span { display: none !important; }
             .list-item button { width: 100% !important; margin-top: 5px !important; }
             
-            /* 悬浮保存按钮：固定在屏幕最底部，并添加背景阴影突出 */
-            .save-panel { 
-                position: fixed !important; 
-                bottom: 20px !important; 
-                left: 15px !important; 
-                right: 15px !important; 
-                width: auto !important; 
-                padding: 0 !important; 
-                margin: 0 !important; 
-                z-index: 9999 !important; 
-            }
-            .save-panel button { 
-                width: 100% !important; 
-                padding: 16px !important; 
-                border-radius: 12px !important; 
-                box-shadow: 0 4px 15px rgba(0,0,0,0.2) !important; 
-                font-size: 16px !important;
-            }
-            
-            /* 其他微调：图片容器自适应 */
+            /* 11. 参考图与节点组件等比缩放 */
             .multi-upload-container { display: flex !important; flex-wrap: wrap !important; gap: 10px !important; }
+            .chip-group, .node-selector, .node-selector-video { display: flex !important; flex-wrap: wrap !important; gap: 8px !important; }
         }
     </style>
 </head>
 <body>
+    <div class="ambient-bg">
+        <div class="color-orb orb-1"></div>
+        <div class="color-orb orb-2"></div>
+        <div class="color-orb orb-3"></div>
+    </div>
+
     <div class="layout-wrapper">
-        <aside class="sidebar">
+        <aside class="sidebar glass-panel">
             <div class="sidebar-header">
                 <div class="brand">
                     <span class="brand-icon">✨</span>
