@@ -6,10 +6,10 @@
     <link rel="stylesheet" href="./style.css" />
     <style>
         .gallery-skeleton {
-            background: linear-gradient(90deg, rgba(255,255,255,0.1) 25%, rgba(255,255,255,0.3) 50%, rgba(255,255,255,0.1) 75%);
+            background: linear-gradient(90deg, rgba(255,255,255,0.05) 25%, rgba(255,255,255,0.2) 50%, rgba(255,255,255,0.05) 75%);
             background-size: 400% 100%;
             animation: skeleton-loading 1.5s infinite ease-in-out;
-            border-radius: 12px;
+            border-radius: 9px;
             height: 140px;
             width: 140px;
             display: inline-block;
@@ -101,12 +101,13 @@
                 <div class="page-header" style="display: flex; justify-content: space-between; align-items: flex-end;">
                     <div><h2>生成图库</h2><p>本地所有通过万象画卷生成的图片归档 (temp_images)。</p></div>
                     <div style="display: flex; gap: 12px; margin-bottom: 8px;">
-                        <button data-action="gallery-select-all" class="btn-glass-secondary btn-small">全选/反选</button>
-                        <button data-action="gallery-delete-selected" class="btn-glass-secondary btn-small" style="color: var(--danger); border-color: var(--danger);">删除选中</button>
+                        <button data-action="gallery-select-all" class="btn-glass-secondary btn-small">全选 / 反选</button>
+                        <button data-action="gallery-delete-selected" class="btn-glass-secondary btn-small" style="color: var(--danger); border-color: var(--danger);">删除选中图</button>
                     </div>
                 </div>
                 <section class="card glass-card">
-                    <div class="multi-upload-container" id="gallery-container" style="min-height: 150px; align-items: center; display: flex; flex-wrap: wrap;">
+                    <div class="multi-upload-container" id="gallery-container" style="min-height: 150px; display: flex; flex-wrap: wrap; gap: 12px;">
+                        <span style="color: var(--text-muted); font-size: 14px; padding: 20px;" id="gallery-status">正在读取本地图库...</span>
                     </div>
                 </section>
             </div>
