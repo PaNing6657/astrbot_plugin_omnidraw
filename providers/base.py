@@ -63,7 +63,7 @@ class BaseProvider(ABC):
     async def generate_image(self, prompt: str, **kwargs: Any) -> str:
         pass
 
-    async def _poll_task_result(self, task_id: str) -> str:
+async def _poll_task_result(self, task_id: str) -> str:
         base_url = self.config.base_url.rstrip("/")
         if base_url.endswith("/v1"):
             poll_url = f"{base_url}/tasks/{task_id}"
@@ -88,7 +88,7 @@ class BaseProvider(ABC):
 
             await asyncio.sleep(poll_interval)
 
-try:
+            try:
                 async with self.session.get(poll_url, headers=headers, timeout=30) as response:
                     if response.status >= 400:
                         logger.warning(f"⚠️ 轮询请求失败: HTTP {response.status}")
@@ -109,31 +109,6 @@ try:
                             if urls and isinstance(urls, list):
                                 return urls[0]
                     raise RuntimeError(f"任务完成但未找到图片 URL。API 返回: {raw_data}")
-
-                if status in {"FAILED", "FAIL", "FAILURE"}:
-                    error_msg = data.get("error", {}).get("message", data.get("message", "未知失败原因"))
-                    raise RuntimeError(f"异步任务失败: {error_msg}")
-
-            except RuntimeError:
-                raise
-            except Exception as exc:
-                logger.warning(f"⚠️ 轮询请求异常: {exc}")
-                continue
-                    data = await response.json()
-
-                status = str(data.get("status", data.get("task_status", ""))).upper()
-                logger.info(f"⏳ [异步轮询] Task ID: {task_id}, 状态: {status}")
-
-                if status == "COMPLETED":
-                    result = data.get("result", {})
-                    images = result.get("images", [])
-                    if images and isinstance(images, list):
-                        img_data = images[0]
-                        if isinstance(img_data, dict):
-                            urls = img_data.get("url", [])
-                            if urls and isinstance(urls, list):
-                                return urls[0]
-                    raise RuntimeError(f"任务完成但未找到图片 URL。API 返回: {data}")
 
                 if status in {"FAILED", "FAIL", "FAILURE"}:
                     error_msg = data.get("error", {}).get("message", data.get("message", "未知失败原因"))
