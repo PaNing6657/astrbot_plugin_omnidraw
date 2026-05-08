@@ -65,7 +65,10 @@ class BaseProvider(ABC):
 
     async def _poll_task_result(self, task_id: str) -> str:
         base_url = self.config.base_url.rstrip("/")
-        poll_url = f"{base_url}/v1/tasks/{task_id}"
+        if base_url.endswith("/v1"):
+            poll_url = f"{base_url}/tasks/{task_id}"
+        else:
+            poll_url = f"{base_url}/v1/tasks/{task_id}"
         headers = {
             "Authorization": "Bearer " + self.get_current_key(),
             "Content-Type": "application/json",
