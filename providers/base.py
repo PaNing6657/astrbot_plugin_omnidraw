@@ -96,11 +96,11 @@ class BaseProvider(ABC):
                     data = await response.json()
 
                 logger.info(f"📥 [异步轮询] 原始响应: {data}")
-                status = str(data.get("status", data.get("task_status", ""))).upper()
-                if not status and "data" in data:
-                    data_item = data.get("data")
-                    if isinstance(data_item, dict):
-                        status = str(data_item.get("status", "")).upper()
+                data_item = data.get("data", {})
+                if isinstance(data_item, dict):
+                    status = str(data_item.get("status", "")).upper()
+                else:
+                    status = str(data.get("status", "")).upper()
                 logger.info(f"⏳ [异步轮询] Task ID: {task_id}, 状态: {status}")
 
                 if status == "COMPLETED":
