@@ -63,7 +63,7 @@ class BaseProvider(ABC):
     async def generate_image(self, prompt: str, **kwargs: Any) -> str:
         pass
 
-async def _poll_task_result(self, task_id: str) -> str:
+    async def _poll_task_result(self, task_id: str) -> str:
         base_url = self.config.base_url.rstrip("/")
         if base_url.endswith("/v1"):
             poll_url = f"{base_url}/tasks/{task_id}"
@@ -93,9 +93,8 @@ async def _poll_task_result(self, task_id: str) -> str:
                     if response.status >= 400:
                         logger.warning(f"⚠️ 轮询请求失败: HTTP {response.status}")
                         continue
-                    raw_data = await response.json()
+                    data = await response.json()
 
-                data = raw_data.get("data", raw_data)
                 status = str(data.get("status", data.get("task_status", ""))).upper()
                 logger.info(f"⏳ [异步轮询] Task ID: {task_id}, 状态: {status}")
 
@@ -108,7 +107,7 @@ async def _poll_task_result(self, task_id: str) -> str:
                             urls = img_data.get("url", [])
                             if urls and isinstance(urls, list):
                                 return urls[0]
-                    raise RuntimeError(f"任务完成但未找到图片 URL。API 返回: {raw_data}")
+                    raise RuntimeError(f"任务完成但未找到图片 URL。API 返回: {data}")
 
                 if status in {"FAILED", "FAIL", "FAILURE"}:
                     error_msg = data.get("error", {}).get("message", data.get("message", "未知失败原因"))
