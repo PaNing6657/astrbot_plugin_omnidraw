@@ -104,7 +104,7 @@ class BaseProvider(ABC):
                 logger.info(f"⏳ [异步轮询] Task ID: {task_id}, 状态: {status}")
 
                 if status == "COMPLETED":
-                    result = data.get("result", {})
+                    result = data_item.get("result", {})
                     images = result.get("images", [])
                     if images and isinstance(images, list):
                         img_data = images[0]
