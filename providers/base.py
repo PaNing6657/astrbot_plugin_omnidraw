@@ -95,7 +95,6 @@ class BaseProvider(ABC):
                         continue
                     data = await response.json()
 
-                logger.info(f"📥 [异步轮询] 原始响应: {data}")
                 data_item = data.get("data", {})
                 if isinstance(data_item, dict):
                     status = str(data_item.get("status", "")).upper()

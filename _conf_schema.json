@@ -155,10 +155,9 @@
             "type": "string",
             "options": [
               "openai_image",
-              "openai_chat",
-              "async_task"
+              "openai_chat"
             ],
-            "hint": "openai_image 适合标准图片接口；openai_chat 适合通过 chat/completions 透传生图的中转站；async_task 为提交后轮询模式（支持 gpt-image-2 等异步 API）。",
+            "hint": "openai_image 适合标准图片接口；openai_chat 适合通过 chat/completions 透传生图的中转站。",
             "default": "openai_image"
           },
           "async_mode": {
