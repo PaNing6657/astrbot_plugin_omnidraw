@@ -27,6 +27,8 @@ class ProviderConfig:
     model: str
     timeout: float
     available_models: List[str] = field(default_factory=list)
+    async_mode: bool = False
+    async_poll_interval: int = 5
 
     @property
     def has_api_key(self) -> bool:
@@ -332,6 +334,8 @@ def _build_provider_config(raw_provider: Any, is_video: bool) -> ProviderConfig:
         available_models.insert(0, model)
 
     default_timeout = 300.0 if is_video else 60.0
+    async_mode = _to_bool(raw_provider.get("async_mode", False))
+    async_poll_interval = _to_int(raw_provider.get("async_poll_interval", 5), 5, minimum=1)
     return ProviderConfig(
         id=str(raw_provider.get("id", raw_provider.get("节点ID", ""))).strip(),
         api_type=_normalize_api_type(raw_provider.get("api_type", raw_provider.get("接口模式", "")), is_video),
@@ -345,6 +349,8 @@ def _build_provider_config(raw_provider: Any, is_video: bool) -> ProviderConfig:
         model=model,
         timeout=_to_float(raw_provider.get("timeout", raw_provider.get("超时时间(秒)", default_timeout)), default_timeout, 1.0),
         available_models=available_models,
+        async_mode=async_mode,
+        async_poll_interval=async_poll_interval,
     )
 
 

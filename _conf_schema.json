@@ -155,10 +155,23 @@
             "type": "string",
             "options": [
               "openai_image",
-              "openai_chat"
+              "openai_chat",
+              "async_task"
             ],
-            "hint": "openai_image 适合标准图片接口；openai_chat 适合通过 chat/completions 透传生图的中转站。",
+            "hint": "openai_image 适合标准图片接口；openai_chat 适合通过 chat/completions 透传生图的中转站；async_task 为提交后轮询模式（支持 gpt-image-2 等异步 API）。",
             "default": "openai_image"
+          },
+          "async_mode": {
+            "description": "启用异步任务模式",
+            "type": "bool",
+            "hint": "开启后将使用异步模式：提交任务 -> 轮询 task_id -> 取图片 URL。",
+            "default": false
+          },
+          "async_poll_interval": {
+            "description": "异步轮询间隔（秒）",
+            "type": "int",
+            "hint": "轮询 task_id 的间隔时间，建议 3-5 秒。首次查询会延迟 10-20 秒。",
+            "default": 5
           },
           "base_url": {
             "description": "接口地址",

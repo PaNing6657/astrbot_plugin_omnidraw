@@ -1,4 +1,5 @@
 import aiohttp
+import asyncio
 import base64
 import json
 import mimetypes
@@ -51,61 +52,137 @@ class OpenAIProvider(BaseProvider):
 
         logger.info(f"📝 [标准通道] 最终发送给 API 的核心提示词:\n{prompt}")
 
-        # 🚀 剥离内置参数，剩下的全是用户或 LLM 透传的高级参数
         internal_keys = {"user_refs", "user_ref", "persona_refs", "persona_ref"}
         api_kwargs = {k: v for k, v in kwargs.items() if k not in internal_keys}
 
-        if ref_images:
-            url = base_url + "/images/edits"
-            logger.info(f"✅ 检测到 {len(ref_images)} 张参考图，正切换至标准改图通道: {url}")
-
-            data = aiohttp.FormData()
-            for idx, ref_image in enumerate(ref_images, start=1):
-                try:
-                    image_bytes = await self._get_image_bytes(ref_image)
-                except Exception as e:
-                    raise RuntimeError(f"读取第 {idx} 张参考图数据失败: {e}")
-                data.add_field(
-                    "image",
-                    image_bytes,
-                    filename=f"reference_{idx}.png",
-                    content_type=self._content_type(ref_image),
-                )
-
-            data.add_field('prompt', prompt)
-            data.add_field('model', self.config.model)
-            data.add_field('n', '1')
-            
-            # 高级参数注入表单
-            for k, v in api_kwargs.items():
-                data.add_field(k, str(v))
-            
-            headers = {"Authorization": "Bearer " + current_key}
-            timeout_obj = aiohttp.ClientTimeout(total=self.config.timeout)
-            async with self.session.post(url, data=data, headers=headers, timeout=timeout_obj) as response:
-                return await self._parse_response(response, base_url)
-                
+        if self.config.async_mode:
+            return await self._generate_image_async(base_url, prompt, ref_images, api_kwargs, current_key)
         else:
-            url = base_url + "/images/generations"
-            
-            # 基础 Payload
-            payload = {
-                "model": self.config.model, 
-                "prompt": prompt, 
-                "n": 1
-            }
-            
-            # 🚀 完美兼容 gptimage2 / gemini-3.1-image 规范
-            # 暴力将所有高级参数塞入 JSON 的最外层，中转 API 会直接识别并调用底层
-            payload.update(api_kwargs)
-            
-            logger.info(f"📤 [标准通道] 附带高级参数的请求体:\n{json.dumps(payload, ensure_ascii=False)}")
-            
-            headers = {"Content-Type": "application/json", "Authorization": "Bearer " + current_key}
-            
-            timeout_obj = aiohttp.ClientTimeout(total=self.config.timeout)
-            async with self.session.post(url, json=payload, headers=headers, timeout=timeout_obj) as response:
-                return await self._parse_response(response, base_url)
+            if ref_images:
+                return await self._generate_image_edit(base_url, prompt, ref_images, api_kwargs, current_key)
+            else:
+                return await self._generate_image_sync(base_url, prompt, api_kwargs, current_key)
+
+    async def _generate_image_async(
+        self,
+        base_url: str,
+        prompt: str,
+        ref_images: list,
+        api_kwargs: dict,
+        current_key: str,
+    ) -> str:
+        url = base_url + "/images/generations"
+
+        payload = {
+            "model": self.config.model,
+            "prompt": prompt,
+            "n": 1,
+        }
+
+        if ref_images:
+            logger.info(f"🖼️ [异步模式] 检测到 {len(ref_images)} 张参考图，使用 image_urls 字段")
+            b64_images = []
+            for ref_image in ref_images:
+                image_bytes = await self._get_image_bytes(ref_image)
+                b64_str = base64.b64encode(image_bytes).decode("utf-8")
+                b64_images.append(f"data:image/png;base64,{b64_str}")
+            payload["image_urls"] = b64_images
+
+        payload.update(api_kwargs)
+
+        logger.info(f"📤 [异步模式] 提交任务，请求体:\n{json.dumps(payload, ensure_ascii=False)}")
+
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": "Bearer " + current_key,
+        }
+
+        timeout_obj = aiohttp.ClientTimeout(total=self.config.timeout)
+        async with self.session.post(url, json=payload, headers=headers, timeout=timeout_obj) as response:
+            if response.status != 200:
+                error_text = await response.text()
+                logger.error("💥 异步任务提交失败:\n" + error_text)
+                try:
+                    error_json = json.loads(error_text)
+                    error_msg = error_json.get("error", {}).get("message", error_text)
+                except Exception:
+                    error_msg = error_text
+                raise RuntimeError("HTTP " + str(response.status) + ": " + error_msg)
+
+            result = await response.json()
+
+            if "data" in result and len(result["data"]) > 0:
+                task_item = result["data"][0]
+                task_id = task_item.get("task_id")
+                status = task_item.get("status", "")
+                if not task_id:
+                    raise RuntimeError(f"异步任务提交成功但未返回 task_id。API 返回: {result}")
+                logger.info(f"✅ [异步模式] 任务提交成功，Task ID: {task_id}, 状态: {status}")
+            else:
+                raise RuntimeError(f"异步任务提交响应结构异常: {result}")
+
+        return await self._poll_task_result(task_id)
+
+    async def _generate_image_edit(
+        self,
+        base_url: str,
+        prompt: str,
+        ref_images: list,
+        api_kwargs: dict,
+        current_key: str,
+    ) -> str:
+        url = base_url + "/images/edits"
+        logger.info(f"✅ 检测到 {len(ref_images)} 张参考图，正切换至标准改图通道: {url}")
+
+        data = aiohttp.FormData()
+        for idx, ref_image in enumerate(ref_images, start=1):
+            try:
+                image_bytes = await self._get_image_bytes(ref_image)
+            except Exception as e:
+                raise RuntimeError(f"读取第 {idx} 张参考图数据失败: {e}")
+            data.add_field(
+                "image",
+                image_bytes,
+                filename=f"reference_{idx}.png",
+                content_type=self._content_type(ref_image),
+            )
+
+        data.add_field('prompt', prompt)
+        data.add_field('model', self.config.model)
+        data.add_field('n', '1')
+
+        for k, v in api_kwargs.items():
+            data.add_field(k, str(v))
+
+        headers = {"Authorization": "Bearer " + current_key}
+        timeout_obj = aiohttp.ClientTimeout(total=self.config.timeout)
+        async with self.session.post(url, data=data, headers=headers, timeout=timeout_obj) as response:
+            return await self._parse_response(response, base_url)
+
+    async def _generate_image_sync(
+        self,
+        base_url: str,
+        prompt: str,
+        api_kwargs: dict,
+        current_key: str,
+    ) -> str:
+        url = base_url + "/images/generations"
+
+        payload = {
+            "model": self.config.model,
+            "prompt": prompt,
+            "n": 1
+        }
+
+        payload.update(api_kwargs)
+
+        logger.info(f"📤 [标准通道] 附带高级参数的请求体:\n{json.dumps(payload, ensure_ascii=False)}")
+
+        headers = {"Content-Type": "application/json", "Authorization": "Bearer " + current_key}
+
+        timeout_obj = aiohttp.ClientTimeout(total=self.config.timeout)
+        async with self.session.post(url, json=payload, headers=headers, timeout=timeout_obj) as response:
+            return await self._parse_response(response, base_url)
 
     async def _parse_response(self, response: aiohttp.ClientResponse, base_url: str) -> str:
         status = response.status
