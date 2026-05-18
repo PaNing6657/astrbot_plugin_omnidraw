@@ -81,48 +81,49 @@ class BaseProvider(ABC):
         start_time = time.time()
         poll_interval = max(3, self.config.async_poll_interval)
 
-        while True:
-            if max_total_wait > 0:
-                elapsed = time.time() - start_time
-                if elapsed >= max_total_wait:
-                    raise RuntimeError(f"异步任务轮询超时，已等待 {max_total_wait} 秒。")
+        try:
+            while True:
+                if max_total_wait > 0:
+                    elapsed = time.time() - start_time
+                    if elapsed >= max_total_wait:
+                        raise RuntimeError(f"异步任务轮询超时，已等待 {max_total_wait} 秒。")
 
-            await asyncio.sleep(poll_interval)
+                await asyncio.sleep(poll_interval)
 
-            try:
-                async with self.session.get(poll_url, headers=headers, timeout=30) as response:
-                    if response.status >= 400:
-                        logger.warning(f"⚠️ 轮询请求失败: HTTP {response.status}")
-                        continue
-                    data = await response.json()
+                try:
+                    async with self.session.get(poll_url, headers=headers, timeout=30) as response:
+                        if response.status >= 400:
+                            logger.warning(f"⚠️ 轮询请求失败: HTTP {response.status}")
+                            continue
+                        data = await response.json()
 
-                data_item = data.get("data", {})
-                if isinstance(data_item, dict):
-                    status = str(data_item.get("status", "")).upper()
-                else:
-                    status = str(data.get("status", "")).upper()
-                logger.info(f"⏳ [异步轮询] Task ID: {task_id}, 状态: {status}")
+                    data_item = data.get("data", {})
+                    if isinstance(data_item, dict):
+                        status = str(data_item.get("status", "")).upper()
+                    else:
+                        status = str(data.get("status", "")).upper()
+                    logger.info(f"⏳ [异步轮询] Task ID: {task_id}, 状态: {status}")
 
-                if status == "COMPLETED":
-                    result = data_item.get("result", {})
-                    images = result.get("images", [])
-                    if images and isinstance(images, list):
-                        img_data = images[0]
-                        if isinstance(img_data, dict):
-                            urls = img_data.get("url", [])
-                            if urls and isinstance(urls, list):
-                                return urls[0]
-                    raise RuntimeError(f"任务完成但未找到图片 URL。API 返回: {data}")
+                    if status == "COMPLETED":
+                        result = data_item.get("result", {})
+                        images = result.get("images", [])
+                        if images and isinstance(images, list):
+                            img_data = images[0]
+                            if isinstance(img_data, dict):
+                                urls = img_data.get("url", [])
+                                if urls and isinstance(urls, list):
+                                    return urls[0]
+                        raise RuntimeError(f"任务完成但未找到图片 URL。API 返回: {data}")
 
-                if status in {"FAILED", "FAIL", "FAILURE"}:
-                    error_msg = data.get("error", {}).get("message", data.get("message", "未知失败原因"))
-                    raise RuntimeError(f"异步任务失败: {error_msg}")
+                    if status in {"FAILED", "FAIL", "FAILURE"}:
+                        error_msg = data.get("error", {}).get("message", data.get("message", "未知失败原因"))
+                        raise RuntimeError(f"异步任务失败: {error_msg}")
 
-            except asyncio.CancelledError:
-                logger.warning(f"⚠️ 异步轮询被取消（任务超时），Task ID: {task_id}")
-                raise RuntimeError(f"图片生成任务超时（超过 120 秒限制），请在配置中减少超时时间或使用同步模式。")
-            except RuntimeError:
-                raise
-            except Exception as exc:
-                logger.warning(f"⚠️ 轮询请求异常: {exc}")
-                continue
+                except RuntimeError:
+                    raise
+                except Exception as exc:
+                    logger.warning(f"⚠️ 轮询请求异常: {exc}")
+                    continue
+        except asyncio.CancelledError:
+            logger.warning(f"⚠️ 异步轮询被取消（任务超时），Task ID: {task_id}")
+            raise RuntimeError(f"图片生成任务超时（超过 120 秒限制），请在配置中减少超时时间或使用同步模式。")
