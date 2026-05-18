@@ -77,14 +77,15 @@ class BaseProvider(ABC):
         logger.info(f"⏳ [异步轮询] 首次查询前等待 15 秒，Task ID: {task_id}")
         await asyncio.sleep(15)
 
-        max_total_wait = max(60, int(self.config.timeout))
+        max_total_wait = int(self.config.timeout)
         start_time = time.time()
         poll_interval = max(3, self.config.async_poll_interval)
 
         while True:
-            elapsed = time.time() - start_time
-            if elapsed >= max_total_wait:
-                raise RuntimeError(f"异步任务轮询超时，已等待 {max_total_wait} 秒。")
+            if max_total_wait > 0:
+                elapsed = time.time() - start_time
+                if elapsed >= max_total_wait:
+                    raise RuntimeError(f"异步任务轮询超时，已等待 {max_total_wait} 秒。")
 
             await asyncio.sleep(poll_interval)
 
