@@ -118,6 +118,9 @@ class BaseProvider(ABC):
                     error_msg = data.get("error", {}).get("message", data.get("message", "未知失败原因"))
                     raise RuntimeError(f"异步任务失败: {error_msg}")
 
+            except asyncio.CancelledError:
+                logger.warning(f"⚠️ 异步轮询被取消（任务超时），Task ID: {task_id}")
+                raise RuntimeError(f"图片生成任务超时（超过 120 秒限制），请在配置中减少超时时间或使用同步模式。")
             except RuntimeError:
                 raise
             except Exception as exc:
